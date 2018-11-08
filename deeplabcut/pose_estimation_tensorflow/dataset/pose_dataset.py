@@ -12,7 +12,10 @@ from numpy import array as arr
 from numpy import concatenate as cat
 
 import scipy.io as sio
-from scipy.misc import imread, imresize
+# from scipy.misc import imread, imresize
+from skimage.io import imread
+from skimage.transform import resize,rotate
+from skimage.exposure import adjust_gamma
 
 class Batch(Enum):
     inputs = 0
@@ -176,6 +179,22 @@ class PoseDataset:
             scale *= scale_jitter
         return scale
 
+    def get_rotation(self):
+        cfg = self.cfg
+        rotation = 0
+        if hasattr(cfg, 'rotation_jitter_lo') and hasattr(cfg, 'rotation_jitter_up'):
+            rotation_jitter = rand.uniform(cfg.rotation_jitter_lo, cfg.rotation_jitter_up)
+            rotation += rotation_jitter
+        return rotation
+
+    def get_gamma(self):
+        cfg = self.cfg
+        gamma = 1
+        if hasattr(cfg, 'gamma_jitter_lo') and hasattr(cfg, 'gamma_jitter_up'):
+            gamma_jitter = rand.uniform(cfg.gamma_jitter_lo, cfg.gamma_jitter_up)
+            gamma *= gamma_jitter
+        return gamma
+
     def next_batch(self):
         while True:
             imidx, mirror = self.next_training_sample()
@@ -239,7 +258,27 @@ class PoseDataset:
             else:
                 pass #no cropping!
                 
-        img = imresize(image, scale) if scale != 1 else image
+        scale = transforms['scale']
+
+        height, width, _ = image.shape
+        new_height = int(round(height*scale))
+        new_width = int(round(width*scale))
+
+        img_s = resize(image, (new_height, new_width), anti_aliasing=False,
+                       mode='constant', preserve_range=True)
+        # img_s = imresize(image, scale) if scale != 1 else image
+
+        if transforms['rotation'] != 0:
+            img_sr = rotate(img_s, transforms['rotation'], resize=True, preserve_range=True)
+        else:
+            img_sr = img_s.copy()
+        if transforms['gamma'] != 1:
+            img_srg = adjust_gamma(img_sr, gamma=transforms['gamma'], gain=1)
+        else:
+            img_srg = img_sr.copy()
+
+        img = np.clip(img_srg, 0, 255).astype('uint8')
+
         scaled_img_size = arr(img.shape[0:2])
 
         if mirror:
@@ -256,11 +295,26 @@ class PoseDataset:
 
             sm_size = np.ceil(scaled_img_size / (stride * 2)).astype(int) * 2
 
-            scaled_joints = [person_joints[:, 1:3] * scale for person_joints in joints]
+            th = transforms['rotation'] * np.pi / 180
+
+            rotmat = arr([[np.cos(th), -np.sin(th)],
+                          [np.sin(th), np.cos(th)]])
+
+            h1, w1, _ = img_s.shape
+            h2, w2, _ = img_sr.shape
+
+            offset = arr([w1/2, h1/2])
+            offset2 = arr([(w2-w1)/2, (h2-h1)/2])
 
             joint_id = [person_joints[:, 0].astype(int) for person_joints in joints]
+
+            joints_raw = [person_joints[:, 1:3] for person_joints in joints]
+
+            joints_s = [pts * scale for pts in joints_raw]
+            joints_sr = [(pts - offset).dot(rotmat) + offset + offset2  for pts in joints_s]
+
             part_score_targets, part_score_weights, locref_targets, locref_mask = self.compute_target_part_scoremap(
-                joint_id, scaled_joints, data_item, sm_size, scale)
+                joint_id, joints_sr, data_item, sm_size, scale)
 
             batch.update({
                 Batch.part_score_targets: part_score_targets,
