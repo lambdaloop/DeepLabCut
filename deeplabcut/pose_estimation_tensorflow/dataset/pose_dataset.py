@@ -295,23 +295,28 @@ class PoseDataset:
 
             sm_size = np.ceil(scaled_img_size / (stride * 2)).astype(int) * 2
 
-            th = transforms['rotation'] * np.pi / 180
-
-            rotmat = arr([[np.cos(th), -np.sin(th)],
-                          [np.sin(th), np.cos(th)]])
-
-            h1, w1, _ = img_s.shape
-            h2, w2, _ = img_sr.shape
-
-            offset = arr([w1/2, h1/2])
-            offset2 = arr([(w2-w1)/2, (h2-h1)/2])
 
             joint_id = [person_joints[:, 0].astype(int) for person_joints in joints]
 
             joints_raw = [person_joints[:, 1:3] for person_joints in joints]
 
             joints_s = [pts * scale for pts in joints_raw]
-            joints_sr = [(pts - offset).dot(rotmat) + offset + offset2  for pts in joints_s]
+
+            if transforms['rotation'] != 0:
+                th = transforms['rotation'] * np.pi / 180
+
+                rotmat = arr([[np.cos(th), -np.sin(th)],
+                              [np.sin(th), np.cos(th)]])
+
+                h1, w1, _ = img_s.shape
+                h2, w2, _ = img_sr.shape
+
+                offset = arr([w1/2, h1/2])
+                offset2 = arr([(w2-w1)/2, (h2-h1)/2])
+
+                joints_sr = [(pts - offset).dot(rotmat) + offset + offset2  for pts in joints_s]
+            else:
+                joints_sr = joints_s
 
             part_score_targets, part_score_weights, locref_targets, locref_mask = self.compute_target_part_scoremap(
                 joint_id, joints_sr, data_item, sm_size, scale)
