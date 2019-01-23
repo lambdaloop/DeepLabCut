@@ -27,7 +27,14 @@ def add_new_videos(config,videos,copy_videos=False,coords=None):
       A list containing the list of cropping coordinates of the video. The default is set to None.
     Examples
     --------
-    >>> deeplabcut.add_new_videos('/home/project/reaching-task-Tanmay-2018-08-23/config.yaml',['/data/videos/mouse5.avi'],copy_videos=False,coords=[0,100,0,200])
+    Video will be added, with cropping dimenions according to the frame dimensinos of mouse5.avi
+    >>> deeplabcut.add_new_videos('/home/project/reaching-task-Tanmay-2018-08-23/config.yaml',['/data/videos/mouse5.avi'])
+    
+    Video will be added, with cropping dimenions [0,100,0,200]
+    >>> deeplabcut.add_new_videos('/home/project/reaching-task-Tanmay-2018-08-23/config.yaml',['/data/videos/mouse5.avi'],copy_videos=False,coords=[[0,100,0,200]])
+
+    Two videos will be added, with cropping dimenions [0,100,0,200] and [0,100,0,250], respectively.
+    >>> deeplabcut.add_new_videos('/home/project/reaching-task-Tanmay-2018-08-23/config.yaml',['/data/videos/mouse5.avi','/data/videos/mouse6.avi'],copy_videos=False,coords=[[0,100,0,200],[0,100,0,250]])
 
     """
     import os
@@ -38,10 +45,10 @@ def add_new_videos(config,videos,copy_videos=False,coords=None):
     from deeplabcut import DEBUG
     from deeplabcut.utils import auxiliaryfunctions
     import cv2
-    
+
     # Read the config file
     cfg = auxiliaryfunctions.read_config(config)
-    
+
     for idx,video in enumerate(videos):
         try:
            video_path = os.path.realpath(video)
@@ -50,20 +57,18 @@ def add_new_videos(config,videos,copy_videos=False,coords=None):
 
         vcap = cv2.VideoCapture(video_path)
         if vcap.isOpened():
-                  # get vcap property
+            # get vcap property
            width = int(vcap.get(cv2.CAP_PROP_FRAME_WIDTH))
            height = int(vcap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-           
+           if coords == None:
+                cfg['video_sets'].update({video_path : {'crop': ', '.join(map(str, [0, width, 0, height]))}})
+           else:
+                c = coords[idx]
+                cfg['video_sets'].update({video_path : {'crop': ', '.join(map(str, c))}})
         else:
            print("Cannot open the video file!")
-        if coords == None:
-            cfg['video_sets'].update({video_path : {'crop': ', '.join(map(str, [0, width, 0, height]))}})
-        else:
-            c = coords[idx]
-            cfg['video_sets'].update({video_path : {'crop': ', '.join(map(str, c))}})
 
-    with open(str(config), 'w') as ymlfile:
-        yaml.dump(cfg, ymlfile,default_flow_style=False)
+    auxiliaryfunctions.write_config(config,cfg)
 
     video_path = Path(config).parents[0] / 'videos'
     data_path = Path(config).parents[0] / 'labeled-data'
@@ -80,7 +85,7 @@ def add_new_videos(config,videos,copy_videos=False,coords=None):
     if copy_videos==True:
         print("Copying the videos")
         for src, dst in zip(videos, destinations):
-            shutil.copy(src,dst)
+            shutil.copy(os.fspath(src),os.fspath(dst)) 
     else:
         print("Creating the symbolic link of the video")
         for src, dst in zip(videos, destinations):

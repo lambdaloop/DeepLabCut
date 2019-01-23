@@ -4,13 +4,12 @@ https://github.com/AlexEMG/DeepLabCut
 A Mathis, alexander.mathis@bethgelab.org
 T Nath, nath@rowland.harvard.edu
 M Mathis, mackenzie@post.harvard.edu
+
 Edited by:
 Hao Wu, hwu01@g.harvard.edu
-This script labels the bodyparts in videos as analyzed by "AnalyzeVideos.py".
-This code does not store any frames and substantially faster!
+Who contributed his OpenCV class!
 
-Videos are not intended to be created in the docker container (due to missing ffmpeg bindings)
-You can find the directory by: "find / | grep ffmpeg" and then setting it.
+You can find the directory for ffmpeg bindings by: "find / | grep ffmpeg" and then setting it.
 """
 
 ####################################################
@@ -39,7 +38,6 @@ from skimage.draw import circle_perimeter, circle
 from deeplabcut.utils.video_processor import VideoProcessorCV as vp # used to CreateVideo
 
 
-
 def get_cmap(n, name='hsv'):
     '''Returns a function that maps each index in 0, 1, ..., n-1 to a distinct
     RGB color; the keyword argument name must be a standard mpl colormap name.'''
@@ -62,16 +60,24 @@ def CreateVideo(clip,Dataframe,pcutoff,dotsize,colormap,DLCscorer,bodyparts2plot
         print("Overall # of frames: ", nframes, "with cropped frame dimensions: ",nx,ny)
 
         print("Generating frames and creating video.")
+        df_likelihood = np.empty((len(bodyparts2plot),nframes))
+        df_x = np.empty((len(bodyparts2plot),nframes))
+        df_y = np.empty((len(bodyparts2plot),nframes))
+        for bpindex, bp in enumerate(bodyparts2plot):
+            df_likelihood[bpindex,:]=Dataframe[DLCscorer][bp]['likelihood'].values
+            df_x[bpindex,:]=Dataframe[DLCscorer][bp]['x'].values
+            df_y[bpindex,:]=Dataframe[DLCscorer][bp]['y'].values
+        
         for index in tqdm(range(nframes)):
             image = clip.load_frame()
             if cropping:
                     image=image[y1:y2,x1:x2]
             else:
                 pass
-            for bpindex, bp in enumerate(bodyparts2plot):
-                if Dataframe[DLCscorer][bp]['likelihood'].values[index] > pcutoff:
-                    xc = int(Dataframe[DLCscorer][bp]['x'].values[index])
-                    yc = int(Dataframe[DLCscorer][bp]['y'].values[index])
+            for bpindex in range(len(bodyparts2plot)):
+                if df_likelihood[bpindex,index] > pcutoff:
+                    xc = int(df_x[bpindex,index])
+                    yc = int(df_y[bpindex,index])
                     #rr, cc = circle_perimeter(yc,xc,radius)
                     rr, cc = circle(yc,xc,dotsize,shape=(ny,nx))
                     image[rr, cc, :] = colors[bpindex]
@@ -95,7 +101,15 @@ def CreateVideoSlow(clip,Dataframe,tmpfolder,dotsize,colormap,alphavalue,pcutoff
 
     print("Duration of video [s]: ", round(duration,2), ", recorded with ", round(fps,2),"fps!")
     print("Overall # of frames: ", int(nframes), "with cropped frame dimensions: ",nx,ny)
-    print("Generating frames")
+    print("Generating frames and creating video.")
+    df_likelihood = np.empty((len(bodyparts2plot),nframes))
+    df_x = np.empty((len(bodyparts2plot),nframes))
+    df_y = np.empty((len(bodyparts2plot),nframes))
+    for bpindex, bp in enumerate(bodyparts2plot):
+        df_likelihood[bpindex,:]=Dataframe[DLCscorer][bp]['likelihood'].values
+        df_x[bpindex,:]=Dataframe[DLCscorer][bp]['x'].values
+        df_y[bpindex,:]=Dataframe[DLCscorer][bp]['y'].values
+            
     for index in tqdm(range(nframes)):
         imagename = tmpfolder + "/file%04d.png" % index
         if os.path.isfile(tmpfolder + "/file%04d.png" % index):
@@ -113,10 +127,10 @@ def CreateVideoSlow(clip,Dataframe,tmpfolder,dotsize,colormap,alphavalue,pcutoff
             plt.imshow(image)
 
             for bpindex, bp in enumerate(bodyparts2plot):
-                if Dataframe[DLCscorer][bp]['likelihood'].values[index] > pcutoff:
+                if df_likelihood[bpindex,index] > pcutoff:
                     plt.scatter(
-                        Dataframe[DLCscorer][bp]['x'].values[index],
-                        Dataframe[DLCscorer][bp]['y'].values[index],
+                        df_x[bpindex,index],
+                        df_y[bpindex,index],
                         s=dotsize**2,
                         color=colors(bpindex),
                         alpha=alphavalue)
@@ -148,7 +162,7 @@ def CreateVideoSlow(clip,Dataframe,tmpfolder,dotsize,colormap,alphavalue,pcutoff
             os.remove(file_name)
     os.chdir(start)
 
-def create_labeled_video(config,video,shuffle=1,trainingsetindex=0,videotype='avi',save_frames=False,delete=False,displayedbodyparts='all'):
+def create_labeled_video(config,videos,shuffle=1,trainingsetindex=0,videotype='avi',save_frames=False,delete=False,displayedbodyparts='all',codec='mp4v'):
     """
     Labels the bodyparts in a video. Make sure the video is already analyzed by the function 'analyze_video'
 
@@ -157,7 +171,7 @@ def create_labeled_video(config,video,shuffle=1,trainingsetindex=0,videotype='av
     config : string
         Full path of the config.yaml file as a string.
 
-    video : list
+    videos : list
         A list of string containing the full paths of the videos to analyze.
 
     shuffle : int, optional
@@ -181,6 +195,8 @@ def create_labeled_video(config,video,shuffle=1,trainingsetindex=0,videotype='av
         from config.yaml are used orr a list of strings that are a subset of the full list.
         E.g. ['hand','Joystick'] for the demo Reaching-Mackenzie-2018-08-30/config.yaml to select only these two body parts.
 
+    codec: codec for labeled video. Options see http://www.fourcc.org/codecs.php [depends on your ffmpeg installation.]
+    
     Examples
     --------
     If you want to create the labeled video for only 1 video
@@ -211,16 +227,16 @@ def create_labeled_video(config,video,shuffle=1,trainingsetindex=0,videotype='av
 
     bodyparts=auxiliaryfunctions.IntersectionofBodyPartsandOnesGivenbyUser(cfg,displayedbodyparts)
     
-    if [os.path.isdir(i) for i in video] == [True]:
+    if [os.path.isdir(i) for i in videos] == [True]:
       print("Analyzing all the videos in the directory")
-      videofolder= video[0]
+      videofolder= videos[0]
       os.chdir(videofolder)
-      videos = np.sort([fn for fn in os.listdir(os.curdir) if (videotype in fn)])
-      print("Starting ", videofolder, videos)
+      Videos = np.sort([fn for fn in os.listdir(os.curdir) if (videotype in fn)])
+      print("Starting ", videofolder, Videos)
     else:
-      videos = video
+      Videos = videos
 
-    for video in videos:
+    for video in Videos:
         videofolder= Path(video).parents[0] #where your folder with videos is.
         os.chdir(str(videofolder))
         videotype = Path(video).suffix
@@ -235,6 +251,7 @@ def create_labeled_video(config,video,shuffle=1,trainingsetindex=0,videotype='av
                 Dataframe = pd.read_hdf(dataname)
                 metadata=auxiliaryfunctions.LoadVideoMetadata(dataname)
                 #print(metadata)
+                datanames=[dataname]
             except FileNotFoundError:
                 datanames=[fn for fn in os.listdir(os.curdir) if (vname in fn) and (".h5" in fn) and "resnet" in fn]
                 if len(datanames)==0:
@@ -248,23 +265,24 @@ def create_labeled_video(config,video,shuffle=1,trainingsetindex=0,videotype='av
                     Dataframe = pd.read_hdf(datanames[0])
                     metadata=auxiliaryfunctions.LoadVideoMetadata(datanames[0])
 
-            #Loading cropping data used during analysis
-            cropping=metadata['data']["cropping"]
-            [x1,x2,y1,y2]=metadata['data']["cropping_parameters"]
-            print(cropping,x1,x2,y1,y2)
-            
-            if save_frames==True:
-                tmpfolder = os.path.join(str(videofolder),'temp-' + vname)
-                auxiliaryfunctions.attempttomakefolder(tmpfolder)
-                clip = vp(video)
-                #CreateVideoSlow(clip,Dataframe,tmpfolder,cfg["dotsize"],cfg["colormap"],cfg["alphavalue"],cfg["pcutoff"],cfg["cropping"],cfg["x1"],cfg["x2"],cfg["y1"],cfg["y2"],delete,DLCscorer,bodyparts)
-                CreateVideoSlow(clip,Dataframe,tmpfolder,cfg["dotsize"],cfg["colormap"],cfg["alphavalue"],cfg["pcutoff"],cropping,x1,x2,y1,y2,delete,DLCscorer,bodyparts)
-            else:
-                clip = vp(fname = video,sname = os.path.join(vname + DLCscorer+'_labeled.mp4'))
-                if cropping:
-                    print("Fast video creation has currently not been implemented for cropped videos. Please use 'save_frames=True' to get the video.")
+            if len(datanames)>0:
+                #Loading cropping data used during analysis
+                cropping=metadata['data']["cropping"]
+                [x1,x2,y1,y2]=metadata['data']["cropping_parameters"]
+                print(cropping,x1,x2,y1,y2)
+                
+                if save_frames==True:
+                    tmpfolder = os.path.join(str(videofolder),'temp-' + vname)
+                    auxiliaryfunctions.attempttomakefolder(tmpfolder)
+                    clip = vp(video)
+                    #CreateVideoSlow(clip,Dataframe,tmpfolder,cfg["dotsize"],cfg["colormap"],cfg["alphavalue"],cfg["pcutoff"],cfg["cropping"],cfg["x1"],cfg["x2"],cfg["y1"],cfg["y2"],delete,DLCscorer,bodyparts)
+                    CreateVideoSlow(clip,Dataframe,tmpfolder,cfg["dotsize"],cfg["colormap"],cfg["alphavalue"],cfg["pcutoff"],cropping,x1,x2,y1,y2,delete,DLCscorer,bodyparts)
                 else:
-                    CreateVideo(clip,Dataframe,cfg["pcutoff"],cfg["dotsize"],cfg["colormap"],DLCscorer,bodyparts,cropping,x1,x2,y1,y2) #NEED TO ADD CROPPING!
+                    clip = vp(fname = video,sname = os.path.join(vname + DLCscorer+'_labeled.mp4'),codec=codec)
+                    if cropping:
+                        print("Fast video creation has currently not been implemented for cropped videos. Please use 'save_frames=True' to get the video.")
+                    else:
+                        CreateVideo(clip,Dataframe,cfg["pcutoff"],cfg["dotsize"],cfg["colormap"],DLCscorer,bodyparts,cropping,x1,x2,y1,y2) #NEED TO ADD CROPPING!
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
